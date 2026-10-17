@@ -1,98 +1,81 @@
 
 #include <pspkernel.h>
 #include <pspdisplay.h>
-#include <pspdebug.h>
 #include <pspgu.h>
 #include <pspgum.h>
 #include <pspctrl.h>
 #include <math.h>
-#include <string.h>
 
 PSP_MODULE_INFO("FutebolPSP", 0, 1, 0);
-PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
+PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
 
-#define BUF_WIDTH 512
-#define SCR_WIDTH 480
-#define SCR_HEIGHT 272
-#define PI 3.14159265f
+#define SW 480
+#define SH 272
+#define BW 512
 
 static unsigned int __attribute__((aligned(16))) list[262144];
-static unsigned short __attribute__((aligned(16))) indices[] = {
-    0, 1, 2, 0, 2, 3
-};
 
 typedef struct {
-    float x, y, z;
     unsigned int color;
+    float x, y, z;
 } Vertex;
 
-static Vertex quad[4];
+static void quad(float x1, float z1, float x2, float z2,
+                 float y, unsigned int color) {
+    Vertex *v = (Vertex *)sceGuGetMemory(6 * sizeof(Vertex));
 
-static void drawQuad(float x1, float z1, float x2, float z2,
-                     float y, unsigned int color) {
-    quad[0] = (Vertex){x1, y, z1, color};
-    quad[1] = (Vertex){x2, y, z1, color};
-    quad[2] = (Vertex){x2, y, z2, color};
-    quad[3] = (Vertex){x1, y, z2, color};
+    v[0] = (Vertex){color, x1, y, z1};
+    v[1] = (Vertex){color, x2, y, z1};
+    v[2] = (Vertex){color, x2, y, z2};
+    v[3] = (Vertex){color, x1, y, z1};
+    v[4] = (Vertex){color, x2, y, z2};
+    v[5] = (Vertex){color, x1, y, z2};
 
-    sceGuColor(color);
-    sceGuDrawArray(GU_TRIANGLES,
-        GU_VERTEX_32BITF | GU_COLOR_8888 |
-        GU_TRANSFORM_3D,
-        6, indices, quad);
+    sceGumDrawArray(GU_TRIANGLES,
+        GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D,
+        6, 0, v);
 }
 
-static void drawLine(float x1, float z1, float x2, float z2,
-                     unsigned int color) {
-    Vertex v[2] = {
-        {x1, 0.025f, z1, color},
-        {x2, 0.025f, z2, color}
-    };
-    sceGuColor(color);
-    sceGuDrawArray(GU_LINES,
-        GU_VERTEX_32BITF | GU_COLOR_8888 |
-        GU_TRANSFORM_3D, 2, 0, v);
+static void player(float x, float z, unsigned int shirt) {
+    /* Corpo e cabeça simplificados */
+    quad(x - 0.32f, z - 0.25f, x + 0.32f, z + 0.25f,
+         0.18f, shirt);
+    quad(x - 0.19f, z - 0.15f, x + 0.19f, z + 0.15f,
+         0.72f, 0xFFCCAA88);
 }
 
-static void drawPlayer(float x, float z, unsigned int color) {
-    drawQuad(x - 0.35f, z - 0.35f,
-             x + 0.35f, z + 0.35f, 0.12f, color);
-    drawQuad(x - 0.22f, z - 0.22f,
-             x + 0.22f, z + 0.22f, 0.42f,
-             0xFFFFCCAA);
-}
-
-int main(void) {
-    pspDebugScreenInit();
-
+static void init3D(void) {
     sceGuInit();
     sceGuStart(GU_DIRECT, list);
 
-    sceGuDrawBuffer(GU_PSM_8888,
-        (void *)0, BUF_WIDTH);
-    sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT,
-        (void *)0x88000, BUF_WIDTH);
-    sceGuDepthBuffer((void *)0x110000, BUF_WIDTH);
-
-    sceGuOffset(2048 - SCR_WIDTH / 2,
-                2048 - SCR_HEIGHT / 2);
-    sceGuViewport(2048, 2048, SCR_WIDTH, SCR_HEIGHT);
-    sceGuDepthRange(65535, 0);
-    sceGuScissor(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    sceGuDrawBuffer(GU_PSM_8888, (void *)0, BW);
+    sceGuDispBuffer(SW, SH, (void *)0x88000, BW);
+    sceGuDepthBuffer((void *)0x110000, BW);
+    sceGuOffset(2048 - SW / 2, 2048 - SH / 2);
+    sceGuViewport(2048, 2048, SW, SH);
+    sceGuScissor(0, 0, SW, SH);
     sceGuEnable(GU_SCISSOR_TEST);
     sceGuEnable(GU_DEPTH_TEST);
     sceGuDepthFunc(GU_GEQUAL);
-    sceGuFrontFace(GU_CW);
-    sceGuShadeModel(GU_SMOOTH);
-    sceGuEnable(GU_CULL_FACE);
+    sceGuDepthRange(65535, 0);
+    sceGuDisable(GU_CULL_FACE);
     sceGuFinish();
     sceGuSync(0, 0);
-
     sceGuDisplay(GU_TRUE);
+}
 
+int main(void) {
     SceCtrlData pad;
-    float ballX = 0.0f, ballZ = 0.0f;
-    float camX = 0.0f, camZ = 14.0f;
+
+    float px = 0.0f, pz = 3.0f;
+    float bx = 0.0f, bz = 2.0f;
+    float vx = 0.0f, vz = 0.0f;
+    float ex = 2.0f, ez = -5.0f;
+    int oldButtons = 0;
+
+    sceCtrlSetSamplingCycle(0);
+    sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
+    init3D();
 
     while (1) {
         sceCtrlReadBufferPositive(&pad, 1);
@@ -100,65 +83,116 @@ int main(void) {
         if (pad.Buttons & PSP_CTRL_START)
             break;
 
-        if (pad.Buttons & PSP_CTRL_LEFT)  ballX -= 0.08f;
-        if (pad.Buttons & PSP_CTRL_RIGHT) ballX += 0.08f;
-        if (pad.Buttons & PSP_CTRL_UP)    ballZ -= 0.08f;
-        if (pad.Buttons & PSP_CTRL_DOWN)  ballZ += 0.08f;
+        float dx = 0.0f, dz = 0.0f;
 
-        if (ballX < -9.0f) ballX = -9.0f;
-        if (ballX >  9.0f) ballX =  9.0f;
-        if (ballZ < -17.0f) ballZ = -17.0f;
-        if (ballZ >  17.0f) ballZ =  17.0f;
+        if (pad.Buttons & PSP_CTRL_LEFT)  dx -= 1.0f;
+        if (pad.Buttons & PSP_CTRL_RIGHT) dx += 1.0f;
+        if (pad.Buttons & PSP_CTRL_UP)    dz -= 1.0f;
+        if (pad.Buttons & PSP_CTRL_DOWN)  dz += 1.0f;
+
+        if (pad.Lx < 90)  dx -= (128 - pad.Lx) / 38.0f;
+        if (pad.Lx > 166) dx += (pad.Lx - 128) / 38.0f;
+        if (pad.Ly < 90)  dz -= (128 - pad.Ly) / 38.0f;
+        if (pad.Ly > 166) dz += (pad.Ly - 128) / 38.0f;
+
+        px += dx * 0.075f;
+        pz += dz * 0.075f;
+
+        if (px < -9.0f) px = -9.0f;
+        if (px >  9.0f) px =  9.0f;
+        if (pz < -17.0f) pz = -17.0f;
+        if (pz >  17.0f) pz =  17.0f;
+
+        /* Bola acompanha o jogador quando está perto */
+        float ddx = bx - px;
+        float ddz = bz - pz;
+
+        if (ddx * ddx + ddz * ddz < 1.5f) {
+            bx = px;
+            bz = pz - 0.55f;
+        }
+
+        /* X chuta a bola na direção do ataque */
+        if ((pad.Buttons & PSP_CTRL_CROSS) &&
+            !(oldButtons & PSP_CTRL_CROSS)) {
+            if (ddx * ddx + ddz * ddz < 2.5f) {
+                vx = dx * 0.20f;
+                vz = -0.65f;
+                if (dx == 0.0f) vx = 0.0f;
+            }
+        }
+
+        oldButtons = pad.Buttons;
+
+        bx += vx;
+        bz += vz;
+        vx *= 0.94f;
+        vz *= 0.94f;
+
+        if (bx < -9.0f || bx > 9.0f) vx = -vx * 0.6f;
+        if (bz < -17.0f || bz > 17.0f) vz = -vz * 0.6f;
+
+        if (bx < -9.0f) bx = -9.0f;
+        if (bx > 9.0f) bx = 9.0f;
+        if (bz < -17.0f) bz = -17.0f;
+        if (bz > 17.0f) bz = 17.0f;
+
+        /* Adversário simples que persegue a bola */
+        if (ex < bx) ex += 0.025f;
+        if (ex > bx) ex -= 0.025f;
+        if (ez < bz) ez += 0.025f;
+        if (ez > bz) ez -= 0.025f;
 
         sceGuStart(GU_DIRECT, list);
-        sceGuClearColor(0xFF66AADD);
+        sceGuClearColor(0xFFB0D8F0);
         sceGuClearDepth(0);
-        sceGuClear(GU_COLOR_BUFFER_BIT |
-                   GU_DEPTH_BUFFER_BIT);
+        sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
 
         sceGumMatrixMode(GU_PROJECTION);
         sceGumLoadIdentity();
-        sceGumPerspective(45.0f, 16.0f / 9.0f,
-                          0.5f, 100.0f);
+        sceGumPerspective(50.0f, 16.0f / 9.0f, 0.5f, 100.0f);
 
         sceGumMatrixMode(GU_VIEW);
         sceGumLoadIdentity();
-        ScePspFVector3 camera = {0.0f, 16.0f, 22.0f};
-        ScePspFVector3 target = {0.0f, 0.0f, 0.0f};
+
+        ScePspFVector3 camera = {px, 11.0f, pz + 13.0f};
+        ScePspFVector3 target = {px, 0.0f, pz - 3.0f};
         ScePspFVector3 up = {0.0f, 1.0f, 0.0f};
         sceGumLookAt(&camera, &target, &up);
 
         sceGumMatrixMode(GU_MODEL);
         sceGumLoadIdentity();
 
-        sceGuDisable(GU_CULL_FACE);
+        /* Gramado */
+        quad(-10, -19, 10, 19, 0.0f, 0xFF267C28);
 
-        drawQuad(-10, -18, 10, 18, 0.0f, 0xFF268A32);
+        /* Faixas do gramado */
+        for (int z = -18; z < 18; z += 4)
+            quad(-9.8f, (float)z, 9.8f, (float)z + 2.0f,
+                 0.015f, 0xFF308A32);
 
-        for (int i = -8; i <= 8; i += 4)
-            drawQuad((float)i, -18, (float)i + 2, 18,
-                     0.01f, 0xFF2D9639);
+        /* Linhas do campo */
+        quad(-9.1f, -17.1f, 9.1f, -16.9f, 0.03f, 0xFFFFFFFF);
+        quad(-9.1f, 16.9f, 9.1f, 17.1f, 0.03f, 0xFFFFFFFF);
+        quad(-9.1f, -17.0f, -8.9f, 17.0f, 0.03f, 0xFFFFFFFF);
+        quad(8.9f, -17.0f, 9.1f, 17.0f, 0.03f, 0xFFFFFFFF);
+        quad(-9.0f, -0.10f, 9.0f, 0.10f, 0.03f, 0xFFFFFFFF);
 
-        drawLine(-9, -17, 9, -17, 0xFFFFFFFF);
-        drawLine(-9, 17, 9, 17, 0xFFFFFFFF);
-        drawLine(-9, -17, -9, 17, 0xFFFFFFFF);
-        drawLine(9, -17, 9, 17, 0xFFFFFFFF);
-        drawLine(-9, 0, 9, 0, 0xFFFFFFFF);
-        drawLine(-9, -8, 9, -8, 0xFFFFFFFF);
-        drawLine(-9, 8, 9, 8, 0xFFFFFFFF);
+        /* Jogadores */
+        player(px, pz, 0xFFDD4422);
+        player(-3.0f, -5.0f, 0xFFDD4422);
+        player(3.0f, -9.0f, 0xFFDD4422);
+        player(ex, ez, 0xFF3333DD);
+        player(-4.0f, 8.0f, 0xFF3333DD);
 
-        drawPlayer(-3, -5, 0xFF3333DD);
-        drawPlayer( 2, -3, 0xFF3333DD);
-        drawPlayer( 0,  5, 0xFFDD3333);
-        drawPlayer( 4,  8, 0xFFDD3333);
+        /* Bola */
+        quad(bx - 0.20f, bz - 0.20f,
+             bx + 0.20f, bz + 0.20f,
+             0.09f, 0xFFFFFFFF);
 
-        drawQuad(ballX - 0.22f, ballZ - 0.22f,
-                 ballX + 0.22f, ballZ + 0.22f,
-                 0.18f, 0xFFFFFFFF);
-
-        sceGuEnable(GU_CULL_FACE);
         sceGuFinish();
         sceGuSync(0, 0);
+        sceDisplayWaitVblankStart();
         sceGuSwapBuffers();
     }
 
