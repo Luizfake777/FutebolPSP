@@ -1,20 +1,9 @@
 /* ======================================================================
- * FUTEBOL PSP - jogo completo em um unico arquivo (src/main.c)
- *
- * Menu, selecao (Brasil, Argentina, Franca, Espanha), uniformes, campo 3D,
- * jogadores 3D animados, bola com fisica simples, IA, goleiros, placar,
- * cronometro e controles PSP. Somente PSP SDK: pspkernel, pspdisplay,
- * pspgu, pspgum, pspctrl, math.h e string.h.
- *
- * Controles em partida:
- *   Analogico / direcional ... mover
- *   Quadrado ou R ............ correr (gasta folego)
- *   X (segurar e soltar) ..... chute (forca pelo tempo segurado)
- *   O ........................ passe (sem bola: carrinho/desarme)
- *   Triangulo ................ passe alto (sem bola: trocar jogador)
- *   L ........................ trocar jogador
- *   START .................... pausa
- * ====================================================================== */
+ * FUTEBOL PSP - Jogo Completo v2.0 (src/main.c)
+ * =================================================================     * 
+ * Melhorias: Jogadores detalhados, Goleiros inteligentes, Dribles (L/R),
+ * Controles solicitados (X chutar, O passe/carrinho), Placar, Animações.
+ * =================================================================     */
 
 #include <pspkernel.h>
 #include <pspdisplay.h>
@@ -27,9 +16,6 @@
 PSP_MODULE_INFO("FutebolPSP", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
 
-/* ---------------------------------------------------------------------
- * Constantes
- * ------------------------------------------------------------------- */
 #define SW 480
 #define BW 512
 #define SH 272
@@ -54,9 +40,6 @@ PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
 #define VTX_3D (GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D)
 #define VTX_2D (GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_2D)
 
-/* ---------------------------------------------------------------------
- * Tipos
- * ------------------------------------------------------------------- */
 typedef struct {
     unsigned int color;
     float x, y, z;
@@ -94,9 +77,6 @@ enum {
     ST_INTRO, ST_PLAY, ST_GOAL, ST_PAUSE, ST_END
 };
 
-/* ---------------------------------------------------------------------
- * Dados estaticos
- * ------------------------------------------------------------------- */
 static const Team teams[4] = {
     { "BRASIL",    "BRA", { RGB(250, 214, 0),   RGB(250, 214, 0),   RGB(0, 70, 170),    RGB(240, 240, 240), 0 } },
     { "ARGENTINA", "ARG", { RGB(120, 190, 240), RGB(245, 245, 245), RGB(25, 25, 25),    RGB(25, 25, 25),    1 } },
@@ -112,7 +92,6 @@ static const Kit gkKits[2] = {
 static const unsigned int skinTones[4] = { RGB(240, 200, 160), RGB(200, 150, 110), RGB(140, 95, 65), RGB(95, 62, 42) };
 static const unsigned int hairTones[4] = { RGB(30, 25, 20), RGB(70, 45, 25), RGB(220, 190, 90), RGB(20, 20, 20) };
 
-/* Fonte bitmap 5x7: 0-9, A-Z, : - . ! < > / espaco */
 static const char FONT_CHARS[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ:-.!<>/ ";
 static const unsigned char FONT[44][7] = {
     {0x0E,0x11,0x13,0x15,0x19,0x11,0x0E}, /* 0 */
@@ -161,9 +140,6 @@ static const unsigned char FONT[44][7] = {
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00}  /* espaco */
 };
 
-/* ---------------------------------------------------------------------
- * Estado global
- * ------------------------------------------------------------------- */
 static unsigned int __attribute__((aligned(16))) list[262144];
 static Vertex ballMesh[BALL_VERTS];
 
@@ -176,7 +152,6 @@ static int running = 1;
 static int menuSel = 0;
 static int selHome = 0, selAway = 1;
 static int teamOf[2] = { 0, 1 };
-static int ctrl = 2;
 static int lastOwner = -2;
 static int score[2];
 static int scorerTeam = 0;
@@ -190,10 +165,8 @@ static float menuAngle = 0.0f;
 static int frameCount = 0;
 static unsigned int gPressed = 0, gReleased = 0;
 static unsigned int rngState = 2463534242u;
+static int ctrl = 2;
 
-/* ---------------------------------------------------------------------
- * Callbacks de saida (botao HOME / PPSSPP)
- * ------------------------------------------------------------------- */
 static int exitCallback(int arg1, int arg2, void *common) {
     (void)arg1; (void)arg2; (void)common;
     sceKernelExitGame();
@@ -201,9 +174,7 @@ static int exitCallback(int arg1, int arg2, void *common) {
 }
 
 static int callbackThread(SceSize args, void *argp) {
-    int cbid;
-    (void)args; (void)argp;
-    cbid = sceKernelCreateCallback("Exit Callback", exitCallback, NULL);
+    int cbid = sceKernelCreateCallback("Exit Callback", exitCallback, NULL);
     sceKernelRegisterExitCallback(cbid);
     sceKernelSleepThreadCB();
     return 0;
@@ -214,9 +185,6 @@ static void setupCallbacks(void) {
     if (thid >= 0) sceKernelStartThread(thid, 0, NULL);
 }
 
-/* ---------------------------------------------------------------------
- * Utilidades
- * ------------------------------------------------------------------- */
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 static float signf(float v) { return v < 0.0f ? -1.0f : 1.0f; }
 
@@ -268,13 +236,9 @@ static void fmtTime(char *b, int s) {
     b[5] = 0;
 }
 
-/* ---------------------------------------------------------------------
- * Inicializacao do GU (igual ao codigo original + clip/shade)
- * ------------------------------------------------------------------- */
 static void init3D(void) {
     sceGuInit();
     sceGuStart(GU_DIRECT, list);
-
     sceGuDrawBuffer(GU_PSM_8888, (void *)0, BW);
     sceGuDispBuffer(SW, SH, (void *)0x88000, BW);
     sceGuDepthBuffer((void *)0x110000, BW);
@@ -320,9 +284,6 @@ static void initBallMesh(void) {
     }
 }
 
-/* ---------------------------------------------------------------------
- * Desenho 2D (HUD, menus, texto)
- * ------------------------------------------------------------------- */
 static void begin2D(void) {
     sceGuDisable(GU_DEPTH_TEST);
     sceGuEnable(GU_BLEND);
@@ -395,16 +356,12 @@ static void drawTextC(float y, float sc, unsigned int col, const char *s) {
     drawTextS((float)SW * 0.5f - textW(s, sc) * 0.5f, y, sc, col, s);
 }
 
-/* ---------------------------------------------------------------------
- * Primitivas 3D
- * ------------------------------------------------------------------- */
 static void tr(float x, float y, float z) {
     ScePspFVector3 v;
     v.x = x; v.y = y; v.z = z;
     sceGumTranslate(&v);
 }
 
-/* quad horizontal no plano XZ (igual ao original) */
 static void quadXZ(float x1, float z1, float x2, float z2, float y, unsigned int color) {
     Vertex *v = (Vertex *)sceGuGetMemory(6 * sizeof(Vertex));
     v[0].color = color; v[0].x = x1; v[0].y = y; v[0].z = z1;
@@ -416,7 +373,6 @@ static void quadXZ(float x1, float z1, float x2, float z2, float y, unsigned int
     sceGumDrawArray(GU_TRIANGLES, VTX_3D, 6, 0, v);
 }
 
-/* linha com espessura no chao */
 static void lineXZ(float x1, float z1, float x2, float z2, float w, unsigned int c) {
     float dx = x2 - x1, dz = z2 - z1;
     float l = sqrtf(dx * dx + dz * dz);
@@ -451,7 +407,6 @@ static void circleLines(float cx, float cz, float r, int seg, float w, unsigned 
     }
 }
 
-/* caixa centrada na origem do sistema atual, com sombreamento por face */
 static void boxRaw(float hx, float hy, float hz, unsigned int c) {
     static const signed char cc[8][3] = {
         {-1,-1,-1}, {1,-1,-1}, {1,1,-1}, {-1,1,-1},
@@ -478,7 +433,6 @@ static void boxRaw(float hx, float hy, float hz, unsigned int c) {
     sceGumDrawArray(GU_TRIANGLES, VTX_3D, 36, 0, v);
 }
 
-/* caixa em coordenadas de mundo */
 static void boxAt(float x, float y, float z, float hx, float hy, float hz, unsigned int c) {
     sceGumMatrixMode(GU_MODEL);
     sceGumLoadIdentity();
@@ -486,7 +440,6 @@ static void boxAt(float x, float y, float z, float hx, float hy, float hz, unsig
     boxRaw(hx, hy, hz, c);
 }
 
-/* parte de um corpo (usa a matriz atual como base) */
 static void partBox(float x, float y, float z, float hx, float hy, float hz, unsigned int c) {
     sceGumPushMatrix();
     tr(x, y, z);
@@ -494,9 +447,6 @@ static void partBox(float x, float y, float z, float hx, float hy, float hz, uns
     sceGumPopMatrix();
 }
 
-/* ---------------------------------------------------------------------
- * Desenho do campo, gols e estadio
- * ------------------------------------------------------------------- */
 static void drawField(void) {
     int i;
     unsigned int wl = RGB(240, 240, 240);
@@ -599,9 +549,6 @@ static void drawStadium(void) {
     }
 }
 
-/* ---------------------------------------------------------------------
- * Jogador 3D animado (cabeca, tronco, bracos, pernas)
- * ------------------------------------------------------------------- */
 static void drawPlayer(const Player *p, const Kit *k) {
     float sp = clampf(p->speed / 6.0f, 0.0f, 1.0f);
     float sw = sinf(p->anim) * 0.95f * sp;
@@ -616,7 +563,7 @@ static void drawPlayer(const Player *p, const Kit *k) {
     sceGumPushMatrix();
     tr(p->x, 0.0f, p->z);
     sceGumRotateY(p->face);
-    sc.x = 1.2f; sc.y = 1.2f; sc.z = 1.2f;
+    sc.x = 1.25f; sc.y = 1.25f; sc.z = 1.25f;
     sceGumScale(&sc);
 
     if (p->diveT > 0.0f) {
@@ -629,7 +576,6 @@ static void drawPlayer(const Player *p, const Kit *k) {
         sceGumRotateX(-1.2f);
     }
 
-    /* pernas */
     for (s = -1.0f; s <= 1.0f; s += 2.0f) {
         sceGumPushMatrix();
         tr(s * 0.11f, 0.5f, 0.0f);
@@ -640,7 +586,6 @@ static void drawPlayer(const Player *p, const Kit *k) {
         sceGumPopMatrix();
     }
 
-    /* tronco, bracos e cabeca */
     sceGumPushMatrix();
     tr(0.0f, 0.5f, 0.0f);
     sceGumRotateX(lean);
@@ -679,9 +624,6 @@ static void drawBall(void) {
     sceGumDrawArray(GU_TRIANGLES, VTX_3D, BALL_VERTS, 0, v);
 }
 
-/* ---------------------------------------------------------------------
- * Camera e mundo
- * ------------------------------------------------------------------- */
 static void updateCamera(void) {
     float fx = ball.x * 0.7f + pl[ctrl].x * 0.3f;
     float fz = ball.z * 0.7f + pl[ctrl].z * 0.3f;
@@ -708,7 +650,6 @@ static void drawWorld(void) {
     sceGumMatrixMode(GU_MODEL);
     sceGumLoadIdentity();
 
-    /* chao: sem teste de profundidade, na ordem de desenho */
     sceGuDisable(GU_DEPTH_TEST);
     drawField();
     drawShadows();
@@ -735,9 +676,6 @@ static void drawWorld(void) {
     drawBall();
 }
 
-/* ---------------------------------------------------------------------
- * HUD e telas sobrepostas
- * ------------------------------------------------------------------- */
 static void drawHUD(void) {
     char buf[48];
     char tb[8];
@@ -829,9 +767,6 @@ static void drawGame(void) {
     drawGameOverlays();
 }
 
-/* ---------------------------------------------------------------------
- * Menus
- * ------------------------------------------------------------------- */
 static void drawMenuModel(const Kit *k, float ox, int skin) {
     Player mp;
     ScePspFVector3 eye, ctr, up;
@@ -862,12 +797,12 @@ static void drawMenuModel(const Kit *k, float ox, int skin) {
 static void drawMenu(void) {
     static const char *items[3] = { "JOGAR", "CONTROLES", "SAIR" };
     static const char *ctl[7] = {
-        "ANALOGICO OU DIRECIONAL: MOVER",
+        "ANALOGICO / DIRECIONAL: MOVER",
         "QUADRADO OU R: CORRER",
         "X: SEGURE E SOLTE PARA CHUTAR",
-        "O: PASSE OU DESARME",
-        "TRIANGULO: PASSE ALTO OU TROCAR",
-        "L: TROCAR JOGADOR",
+        "O: PASSE / CARRINHO (SEM BOLA)",
+        "TRIANGULO: PASSE ALTO / TROCAR",
+        "L ou R: DRIBLE / FINTAS RAPIDAS",
         "START: PAUSAR"
     };
     int i;
@@ -898,7 +833,7 @@ static void drawMenu(void) {
         begin2D();
         drawTextC(16.0f, 4.0f, RGB(255, 235, 40), "CONTROLES");
         for (i = 0; i < 7; i++)
-            drawTextS(40.0f, 70.0f + (float)i * 26.0f, 2.0f, RGB(255, 255, 255), ctl[i]);
+            drawTextS(40.0f, 66.0f + (float)i * 26.0f, 2.0f, RGB(255, 255, 255), ctl[i]);
         drawTextC(252.0f, 1.0f, RGB(200, 220, 200), "X OU O: VOLTAR");
         end2D();
         break;
@@ -927,9 +862,6 @@ static void drawMenu(void) {
     }
 }
 
-/* ---------------------------------------------------------------------
- * Acoes de bola
- * ------------------------------------------------------------------- */
 static void takeBall(int i) {
     ball.owner = i;
     ball.lastTeam = pl[i].team;
@@ -1034,9 +966,6 @@ static int bestMate(int idx, float ax, float az, int useFacing) {
     return best;
 }
 
-/* ---------------------------------------------------------------------
- * Inteligencia artificial
- * ------------------------------------------------------------------- */
 static void moveToward(Player *p, float tx, float tz, float spd) {
     float dx = tx - p->x, dz = tz - p->z;
     float d = sqrtf(dx * dx + dz * dz);
@@ -1108,7 +1037,7 @@ static void aiKeeper(int i) {
     float sgn = (t == 0) ? 1.0f : -1.0f;
     float lineZ = own - sgn * 1.3f;
     float tx = clampf(ball.x * 0.45f, -2.0f, 2.0f);
-    float spd = 4.6f;
+    float spd = 4.8f;
 
     if (ball.owner == i) {
         p->dvx = 0.0f; p->dvz = 0.0f;
@@ -1131,7 +1060,7 @@ static void aiKeeper(int i) {
             }
             px = ball.x + ball.vx * th + p->aimX;
             tx = clampf(px, -2.3f, 2.3f);
-            spd = 5.5f;
+            spd = 6.0f;
             if (fabsf(tx - p->x) > 0.9f && th < 0.35f && p->diveT <= 0.0f && p->cool <= 0.0f) {
                 p->diveT = 0.55f;
                 p->diveDir = signf(tx - p->x);
@@ -1191,9 +1120,6 @@ static void updateAI(void) {
     }
 }
 
-/* ---------------------------------------------------------------------
- * Controle do jogador humano
- * ------------------------------------------------------------------- */
 static void switchPlayer(void) {
     int n = nearestOutfielder(0, ball.x, ball.z, ctrl);
     if (n >= 0) { ctrl = n; charge = 0.0f; }
@@ -1218,7 +1144,7 @@ static void updateUser(const SceCtrlData *pad) {
 
     wantSprint = (pad->Buttons & (PSP_CTRL_SQUARE | PSP_CTRL_RTRIGGER)) != 0;
     if (wantSprint && c->stamina > 0.02f && mag > 0.3f) {
-        spd = 6.3f;
+        spd = 6.4f;
         c->stamina -= 0.28f * DT;
     } else {
         c->stamina += 0.12f * DT;
@@ -1236,6 +1162,13 @@ static void updateUser(const SceCtrlData *pad) {
     } else {
         c->aimX = sinf(c->face);
         c->aimZ = cosf(c->face);
+    }
+
+    /* SISTEMA DE DRIBLES (Ativado ao apertar L ou R com a bola) */
+    if ((gPressed & (PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER)) && ball.owner == ctrl) {
+        c->face += 0.85f * signf(mx != 0.0f ? mx : 1.0f);
+        c->vx += c->aimX * 3.5f;
+        c->vz += c->aimZ * 3.5f;
     }
 
     if (pad->Buttons & PSP_CTRL_CROSS) charge = clampf(charge + DT / 0.85f, 0.0f, 1.0f);
@@ -1265,12 +1198,9 @@ static void updateUser(const SceCtrlData *pad) {
             switchPlayer();
         }
     }
-    if (gPressed & PSP_CTRL_LTRIGGER) switchPlayer();
+    if (gPressed & PSP_CTRL_LTRIGGER && ball.owner != ctrl) switchPlayer();
 }
 
-/* ---------------------------------------------------------------------
- * Atualizacao dos jogadores e da bola
- * ------------------------------------------------------------------- */
 static void updatePlayers(void) {
     int i, j;
     for (i = 0; i < 8; i++) {
@@ -1339,7 +1269,7 @@ static void updateBallControl(void) {
             if (d2 < 0.64f && ball.y < 0.95f && bs < 18.0f) takeBall(i);
         } else if (ball.owner != i && pl[ball.owner].team != p->team) {
             if (d2 < 0.72f) {
-                float chance = (p->slideT > 0.0f) ? 0.12f : 0.035f;
+                float chance = (p->slideT > 0.0f) ? 0.16f : 0.045f;
                 if (rnd01() < chance) {
                     int prev = ball.owner;
                     takeBall(i);
@@ -1349,24 +1279,23 @@ static void updateBallControl(void) {
         }
     }
 
-    /* goleiros: defesa ou agarrar */
     for (i = 0; i < 8; i += 4) {
         Player *p = &pl[i];
         float reach, hmax;
         if (ball.owner != -1 || p->cool > 0.0f) continue;
-        reach = (p->diveT > 0.0f) ? 1.5f : 0.95f;
-        hmax = (p->diveT > 0.0f) ? 1.9f : 1.5f;
+        reach = (p->diveT > 0.0f) ? 1.7f : 1.1f;
+        hmax = (p->diveT > 0.0f) ? 2.0f : 1.6f;
         if (distf(p->x, p->z, ball.x, ball.z) < reach && ball.y < hmax) {
-            if (bs > 12.5f) {
-                ball.vz = -ball.vz * 0.45f;
-                ball.vx = ball.vx * 0.5f + rndRange(-3.0f, 3.0f);
-                ball.vy = 2.0f;
+            if (bs > 11.0f) {
+                ball.vz = -ball.vz * 0.35f;
+                ball.vx = ball.vx * 0.4f + rndRange(-3.5f, 3.5f);
+                ball.vy = 2.4f;
                 ball.lastTeam = p->team;
                 ball.lastTouch = i;
-                p->cool = 0.5f;
+                p->cool = 0.4f;
             } else {
                 takeBall(i);
-                gkHold = 1.2f;
+                gkHold = 1.4f;
             }
         }
     }
@@ -1493,7 +1422,6 @@ static void updateBall(void) {
     ball.spinZ -= ball.vx * DT / BALL_R;
 
     if (gState == ST_GOAL) {
-        /* rede do gol: mantem a bola dentro */
         if (fabsf(ball.z) > FIELD_Z + GOAL_DEPTH - 0.25f) {
             ball.z = signf(ball.z) * (FIELD_Z + GOAL_DEPTH - 0.25f);
             ball.vz *= -0.25f;
@@ -1517,9 +1445,6 @@ static void updateBall(void) {
     }
 }
 
-/* ---------------------------------------------------------------------
- * Partida: formacao, saida de bola, atualizacao geral
- * ------------------------------------------------------------------- */
 static void setupPlayers(void) {
     static const float hx[4] = { 0.0f, 0.0f, -4.5f, 4.5f };
     static const float hz[4] = { 15.8f, 9.0f, 3.8f, 3.8f };
@@ -1624,7 +1549,6 @@ static void updateGame(const SceCtrlData *pad) {
         break;
     }
 
-    /* ST_PLAY */
     if (gPressed & PSP_CTRL_START) { gState = ST_PAUSE; return; }
 
     timeLeft -= DT;
@@ -1711,9 +1635,6 @@ static int isMenuState(void) {
            gState == ST_SEL_HOME || gState == ST_SEL_AWAY;
 }
 
-/* ---------------------------------------------------------------------
- * Main
- * ------------------------------------------------------------------- */
 int main(void) {
     SceCtrlData pad;
     unsigned int oldButtons = 0;
