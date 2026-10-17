@@ -19,7 +19,7 @@ jobs:
             -v "$PWD:/source" \
             -w /source \
             pspdev/pspdev:latest \
-            bash -lc "make"
+            bash -lc 'export PSPDEV=/usr/local/pspdev; export PATH="$PSPDEV/bin:$PATH"; make'
 
       - name: Guardar EBOOT.PBP
         uses: actions/upload-artifact@v4
