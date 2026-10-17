@@ -1,0 +1,30 @@
+
+name: Build FutebolPSP
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v4
+
+      - name: Compilar jogo PSP
+        run: |
+          docker run --rm \
+            -v "$PWD:/source" \
+            -w /source \
+            pspdev/pspdev:latest \
+            bash -lc "make"
+
+      - name: Guardar EBOOT.PBP
+        uses: actions/upload-artifact@v4
+        with:
+          name: FutebolPSP-EBOOT
+          path: EBOOT.PBP
+          if-no-files-found: error
+          retention-days: 7
